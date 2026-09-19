@@ -3,9 +3,12 @@ export var GAME_STATE = {
     LOADING: 'LOADING',
     START_SCREEN: 'START_SCREEN',
     PLAYING: 'PLAYING',
+    PAUSED: 'PAUSED',
     GAME_OVER: 'GAME_OVER',
     HIGH_SCORE_ENTRY: 'HIGH_SCORE_ENTRY'
 };
+export var THEME_MUSIC_URL = 'https://play.rosebud.ai/assets/Pitch Perfector Theme.mp3?CFIc';
+export var MUTE_STORAGE_KEY = 'pitchPerfector.muted';
 // Musical Notes (Frequencies in Hz) - C3 to C5 Range
 // Using standard A4 = 440 Hz tuning
 export var NOTES = {

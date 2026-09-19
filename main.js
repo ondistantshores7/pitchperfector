@@ -7,5 +7,6 @@ if (!renderDiv) {
 } else {
     // Initialize and start the game
     var game = new Game(renderDiv);
+    window.game = game;
     game.start();
 }

@@ -18,6 +18,8 @@ function _create_class(Constructor, protoProps, staticProps) {
     return Constructor;
 }
 import { GAME_STATE, MAX_LEVELS } from './constants.js';
+import { formatSolfegeDisplay } from './scoreUtils.js';
+import { loadHighScores } from './highScores.js';
 export var UI = /*#__PURE__*/ function() {
     "use strict";
     function UI(container, gameInstance) {
@@ -26,6 +28,7 @@ export var UI = /*#__PURE__*/ function() {
         this.container = container;
         this.game = gameInstance; // Reference to the main game logic
         this.displayMode = 'solfege'; // 'solfege' or 'pitch'
+        this.isCapturingText = false;
         // Create UI container overlay
         this.uiContainer = document.createElement('div');
         this.uiContainer.style.position = 'absolute';
@@ -47,7 +50,7 @@ export var UI = /*#__PURE__*/ function() {
         container.appendChild(this.uiContainer);
         // Inject font and animation CSS
         var styleSheet = document.createElement('style');
-        styleSheet.textContent = "\n    @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');\n    /* Shake animation */\n    @keyframes shake {\n      10%, 90% { transform: translate3d(-1px, 0, 0); }\n      20%, 80% { transform: translate3d(2px, 0, 0); }\n      30%, 50%, 70% { transform: translate3d(-4px, 0, 0); }\n      40%, 60% { transform: translate3d(4px, 0, 0); }\n    }\n    .shake {\n      animation: shake 0.5s cubic-bezier(.36,.07,.19,.97) both;\n      transform: translate3d(0, 0, 0);\n    }\n    /* Space pulse animation */\n    @keyframes space-pulse {\n      0% { transform: scale(1); box-shadow: 3px 3px #00FFFF, 0 0 0px #FFF; }\n      50% { transform: scale(1.1); box-shadow: 3px 3px #00FFFF, 0 0 20px #FFF; }\n      100% { transform: scale(1); box-shadow: 3px 3px #00FFFF, 0 0 0px #FFF; }\n    }\n    .space-pulse {\n        animation: space-pulse 0.4s ease-out;\n    }\n";
+        styleSheet.textContent = "\n    @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');\n    /* Shake animation */\n    @keyframes shake {\n      10%, 90% { transform: translate3d(-1px, 0, 0); }\n      20%, 80% { transform: translate3d(2px, 0, 0); }\n      30%, 50%, 70% { transform: translate3d(-4px, 0, 0); }\n      40%, 60% { transform: translate3d(4px, 0, 0); }\n    }\n    .shake {\n      animation: shake 0.5s cubic-bezier(.36,.07,.19,.97) both;\n      transform: translate3d(0, 0, 0);\n    }\n    /* Space pulse animation */\n    @keyframes space-pulse {\n      0% { transform: scale(1); box-shadow: 3px 3px #00FFFF, 0 0 0px #FFF; }\n      50% { transform: scale(1.1); box-shadow: 3px 3px #00FFFF, 0 0 20px #FFF; }\n      100% { transform: scale(1); box-shadow: 3px 3px #00FFFF, 0 0 0px #FFF; }\n    }\n    .space-pulse {\n        animation: space-pulse 0.4s ease-out;\n    }\n    .pp-overlay {\n        position: absolute;\n        inset: 0;\n        display: none;\n        align-items: center;\n        justify-content: center;\n        background: rgba(5, 0, 16, 0.82);\n        z-index: 8;\n        pointer-events: auto;\n        padding: 20px;\n        box-sizing: border-box;\n    }\n    .pp-overlay.visible { display: flex; }\n    .pp-card {\n        width: min(520px, 92vw);\n        background: rgba(8, 0, 24, 0.95);\n        border: 3px solid #FF00FF;\n        box-shadow: 6px 6px #00FFFF;\n        padding: 24px 20px;\n        text-align: center;\n        color: #FFF;\n        font-family: \"Press Start 2P\", cursive, sans-serif;\n    }\n    .pp-help {\n        max-width: 720px;\n        font-size: 10px;\n        line-height: 1.7;\n        text-align: center;\n        color: #00FFFF;\n        text-shadow: 1px 1px #FF00FF;\n    }\n    .pp-scores {\n        min-width: 280px;\n        font-size: 10px;\n        line-height: 1.8;\n        color: #FFF;\n    }\n    .pp-initials {\n        width: 96px;\n        text-align: center;\n        font-size: 22px;\n        letter-spacing: 6px;\n        text-transform: uppercase;\n        background: #111;\n        color: #00FFFF;\n        border: 2px solid #00FFFF;\n        font-family: \"Press Start 2P\", cursive, sans-serif;\n        padding: 8px 6px;\n    }\n";
         document.head.appendChild(styleSheet);
         // --- UI Elements ---
         // Remove explicit marginTop for title, rely on flex gap
@@ -108,10 +111,25 @@ export var UI = /*#__PURE__*/ function() {
         // Append Dropdown and Toggle Switch to their container
         this.levelControlContainer.appendChild(this.gameLevelSelect);
         this.levelControlContainer.appendChild(this.displayModeToggle); // Add the toggle switch
+        this.hudRight = this.createDiv({
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'flex-end',
+            gap: '8px',
+            flexShrink: 0
+        });
+        this.statsDisplay = this.createText('Q 1/10', '10px', 'right');
+        this.muteButton = this.createButton('Mute', function() {
+            return _this.game.toggleMute();
+        }, '10px');
+        this.muteButton.style.padding = '6px 10px';
+        this.hudRight.appendChild(this.scoreDisplay);
+        this.hudRight.appendChild(this.statsDisplay);
+        this.hudRight.appendChild(this.muteButton);
         // Append the container, title, and score to the main header
         this.gameHeader.appendChild(this.levelControlContainer);
         this.gameHeader.appendChild(this.gameTitleHeader);
-        this.gameHeader.appendChild(this.scoreDisplay);
+        this.gameHeader.appendChild(this.hudRight);
         // Add keyboard number shortcut event listener
         this.keyboardShortcutHandler = this.handleKeyboardShortcut.bind(this);
         window.addEventListener('keydown', this.keyboardShortcutHandler);
@@ -183,6 +201,19 @@ export var UI = /*#__PURE__*/ function() {
         this.pianoToggle.style.transform = 'translateX(-50%)';
         this.pianoToggle.style.visibility = 'hidden'; // Start hidden
         this.uiContainer.appendChild(this.pianoToggle);
+        this.helpPanel = this.createText('Listen to the 3-note pattern, then pick the matching solfege.\nButtons or keys 1-4 work. Fly with WASD / arrows and Space to shoot. Click a floating answer too.\nEnter starts / next · P replay · M mute · Esc pause', '10px', 'center');
+        this.helpPanel.className = 'pp-help';
+        this.helpPanel.style.whiteSpace = 'pre-line';
+        this.helpPanel.style.maxWidth = '760px';
+        this.helpPanel.style.lineHeight = '1.8';
+        this.highScorePanel = this.createDiv({
+            className: 'pp-scores'
+        });
+        this.buildOverlays();
+        this.uiContainer.appendChild(this.helpPanel);
+        this.uiContainer.appendChild(this.highScorePanel);
+        this.updateMuteButton(this.game.audioManager.muted);
+        this.renderHighScorePanel();
     }
     _create_class(UI, [
         {
@@ -277,16 +308,18 @@ export var UI = /*#__PURE__*/ function() {
                 this.titleElement.style.visibility = 'visible';
                 this.levelSelect.style.visibility = 'visible';
                 this.startButton.style.visibility = 'visible';
+                this.helpPanel.style.visibility = 'visible';
+                this.highScorePanel.style.visibility = 'visible';
                 this.gameHeader.style.visibility = 'hidden';
                 this.playPatternButton.style.visibility = 'hidden';
                 this.answerContainer.style.visibility = 'hidden';
                 this.feedbackElement.style.visibility = 'hidden';
                 this.pianoToggle.style.visibility = 'hidden'; // Hide piano toggle on start screen
-                // this.game.piano.hide(); // Piano hiding handled by game logic potentially
-                // this.game.rocket.hide(); // Rocket should be SHOWN on start screen now, remove hiding
+                this.hideNextPatternButton();
                 // Reset start button state if returning to start screen
                 this.startButton.disabled = false;
                 this.startButton.classList.remove('space-pulse');
+                this.renderHighScorePanel();
             }
         },
         {
@@ -295,11 +328,14 @@ export var UI = /*#__PURE__*/ function() {
                 this.titleElement.style.visibility = 'hidden';
                 this.levelSelect.style.visibility = 'hidden';
                 this.startButton.style.visibility = 'hidden';
+                this.helpPanel.style.visibility = 'hidden';
+                this.highScorePanel.style.visibility = 'hidden';
                 this.gameHeader.style.visibility = 'visible';
                 this.playPatternButton.style.visibility = 'visible';
                 this.answerContainer.style.visibility = 'visible';
                 this.updateLevel(level);
                 this.updateScore(score);
+                this.updateMuteButton(this.game.audioManager.muted);
                 this.game.piano.show(); // Show piano
                 this.pianoToggle.style.visibility = 'visible'; // Show piano toggle
             }
@@ -329,7 +365,7 @@ export var UI = /*#__PURE__*/ function() {
                 // Create new buttons
                 options.forEach(function(optionText, index) {
                     // --- Replace "So" with "Sol" ---
-                    var correctedOptionText = optionText.replace(/\bSo\b/g, 'Sol');
+                    var correctedOptionText = formatSolfegeDisplay(optionText);
                     var displayText = correctedOptionText; // Start with corrected Solfege
                     // If display mode is 'pitch', try to convert Solfege to Pitch Names
                     if (_this.displayMode === 'pitch') {
@@ -399,6 +435,7 @@ export var UI = /*#__PURE__*/ function() {
                         // *** IMPORTANT: Always submit the original Solfege string (optionText) ***
                         _this.game.submitAnswer(optionText, event.target);
                     }, '14px');
+                    button.dataset.option = optionText;
                     button.style.width = '240px'; // Increased width for better text fit
                     button.style.minHeight = '40px'; // Ensure consistent height
                     // Add number label under button
@@ -624,7 +661,7 @@ export var UI = /*#__PURE__*/ function() {
             key: "handleKeyboardShortcut",
             value: function handleKeyboardShortcut(event) {
                 // Only process if we're in the PLAYING state and have answer options
-                if (this.game.gameState !== GAME_STATE.PLAYING || !this.answerContainer.firstChild) return;
+                if (this.isCapturingText || this.game.gameState !== GAME_STATE.PLAYING || !this.answerContainer.firstChild) return;
                 // Check if key pressed is 1-4
                 var key = event.key;
                 if (key >= '1' && key <= '4') {
@@ -652,6 +689,239 @@ export var UI = /*#__PURE__*/ function() {
                         }
                     }
                 }
+            }
+        },
+        {
+            key: "getButtonForOption",
+            value: function getButtonForOption(optionText) {
+                if (!optionText) return null;
+                var buttons = this.answerContainer.querySelectorAll('.option-container > button');
+                for(var i = 0; i < buttons.length; i++){
+                    if (buttons[i].dataset.option === optionText) return buttons[i];
+                }
+                var options = this.game.currentQuestion && this.game.currentQuestion.options || [];
+                var index = options.indexOf(optionText);
+                if (index >= 0 && buttons[index]) return buttons[index];
+                return null;
+            }
+        },
+        {
+            key: "highlightCorrectOption",
+            value: function highlightCorrectOption(optionText) {
+                var button = this.getButtonForOption(optionText);
+                if (button) this.highlightCorrectButton(button);
+            }
+        },
+        {
+            key: "markEliminatedOption",
+            value: function markEliminatedOption(optionText) {
+                var button = this.getButtonForOption(optionText);
+                if (!button) return;
+                button.dataset.eliminated = 'true';
+                button.style.backgroundColor = 'rgba(50, 0, 0, 0.6)';
+                button.style.opacity = '0.7';
+                button.style.boxShadow = 'none';
+                button.style.color = '#FF6666';
+                button.style.borderColor = '#8B0000';
+            }
+        },
+        {
+            key: "updateStats",
+            value: function updateStats(stats) {
+                if (!this.statsDisplay || !stats) return;
+                var streakText = stats.streak > 1 ? "  ·  Streak x".concat(stats.streak) : '';
+                this.statsDisplay.textContent = "Q ".concat(stats.question, "/").concat(stats.total).concat(streakText);
+            }
+        },
+        {
+            key: "updateMuteButton",
+            value: function updateMuteButton(muted) {
+                if (!this.muteButton) return;
+                this.muteButton.textContent = muted ? 'Unmute' : 'Mute';
+            }
+        },
+        {
+            key: "renderHighScorePanel",
+            value: function renderHighScorePanel() {
+                var scores = arguments.length > 0 && arguments[0] !== void 0 ? arguments[0] : loadHighScores();
+                this.highScorePanel.innerHTML = '';
+                var heading = this.createText('High Scores', '14px', 'center');
+                heading.style.marginBottom = '8px';
+                this.highScorePanel.appendChild(heading);
+                if (!scores.length) {
+                    this.highScorePanel.appendChild(this.createText('No scores yet — go make one.', '10px', 'center'));
+                    return;
+                }
+                scores.slice(0, 5).forEach(function(entry, index) {
+                    var row = document.createElement('div');
+                    row.textContent = "".concat(index + 1, ". ").concat(entry.name, "  ").concat(entry.score, "  L").concat(entry.level);
+                    row.style.textAlign = 'center';
+                    this.highScorePanel.appendChild(row);
+                }.bind(this));
+            }
+        },
+        {
+            key: "buildOverlays",
+            value: function buildOverlays() {
+                var _this = this;
+                this.overlayRoot = document.createElement('div');
+                this.gameOverOverlay = document.createElement('div');
+                this.gameOverOverlay.className = 'pp-overlay';
+                this.gameOverCard = document.createElement('div');
+                this.gameOverCard.className = 'pp-card';
+                this.gameOverTitle = this.createText('Game Complete!', '22px', 'center');
+                this.gameOverStats = this.createText('', '12px', 'center');
+                this.gameOverStats.style.lineHeight = '1.8';
+                this.gameOverStats.style.margin = '16px 0';
+                this.nameEntryRow = this.createDiv({
+                    display: 'none',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    gap: '10px',
+                    marginBottom: '16px'
+                });
+                this.nameEntryLabel = this.createText('New high score! Initials:', '10px', 'center');
+                this.nameInput = document.createElement('input');
+                this.nameInput.className = 'pp-initials';
+                this.nameInput.maxLength = 3;
+                this.nameInput.placeholder = 'AAA';
+                this.nameInput.addEventListener('focus', function() {
+                    _this.isCapturingText = true;
+                });
+                this.nameInput.addEventListener('blur', function() {
+                    _this.isCapturingText = false;
+                });
+                this.nameInput.addEventListener('input', function() {
+                    _this.nameInput.value = _this.nameInput.value.replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 3);
+                });
+                this.nameInput.addEventListener('keydown', function(event) {
+                    if (event.key === 'Enter') {
+                        event.preventDefault();
+                        _this.game.submitHighScore(_this.nameInput.value);
+                    }
+                });
+                this.saveScoreButton = this.createButton('Save Score', function() {
+                    return _this.game.submitHighScore(_this.nameInput.value);
+                }, '12px');
+                this.nameEntryRow.appendChild(this.nameEntryLabel);
+                this.nameEntryRow.appendChild(this.nameInput);
+                this.nameEntryRow.appendChild(this.saveScoreButton);
+                this.gameOverScores = this.createDiv({
+                    className: 'pp-scores',
+                    marginBottom: '18px'
+                });
+                this.gameOverActions = this.createDiv({
+                    display: 'flex',
+                    justifyContent: 'center',
+                    gap: '12px',
+                    flexWrap: 'wrap'
+                });
+                this.playAgainButton = this.createButton('Play Again', function() {
+                    return _this.game.startGame();
+                }, '12px');
+                this.menuButton = this.createButton('Menu', function() {
+                    return _this.game.returnToMenu();
+                }, '12px');
+                this.gameOverActions.appendChild(this.playAgainButton);
+                this.gameOverActions.appendChild(this.menuButton);
+                this.gameOverCard.appendChild(this.gameOverTitle);
+                this.gameOverCard.appendChild(this.gameOverStats);
+                this.gameOverCard.appendChild(this.nameEntryRow);
+                this.gameOverCard.appendChild(this.gameOverScores);
+                this.gameOverCard.appendChild(this.gameOverActions);
+                this.gameOverOverlay.appendChild(this.gameOverCard);
+                this.pauseOverlay = document.createElement('div');
+                this.pauseOverlay.className = 'pp-overlay';
+                this.pauseCard = document.createElement('div');
+                this.pauseCard.className = 'pp-card';
+                this.pauseCard.appendChild(this.createText('Paused', '24px', 'center'));
+                var pauseHint = this.createText('Esc or Enter to resume', '10px', 'center');
+                pauseHint.style.margin = '16px 0';
+                this.pauseCard.appendChild(pauseHint);
+                var pauseActions = this.createDiv({
+                    display: 'flex',
+                    justifyContent: 'center',
+                    gap: '12px',
+                    flexWrap: 'wrap'
+                });
+                pauseActions.appendChild(this.createButton('Resume', function() {
+                    return _this.game.togglePause();
+                }, '12px'));
+                pauseActions.appendChild(this.createButton('Menu', function() {
+                    return _this.game.returnToMenu();
+                }, '12px'));
+                this.pauseCard.appendChild(pauseActions);
+                this.pauseOverlay.appendChild(this.pauseCard);
+                this.overlayRoot.appendChild(this.gameOverOverlay);
+                this.overlayRoot.appendChild(this.pauseOverlay);
+                this.container.appendChild(this.overlayRoot);
+            }
+        },
+        {
+            key: "showGameOverScreen",
+            value: function showGameOverScreen(details) {
+                this.hidePauseOverlay();
+                this.gameOverTitle.textContent = details.title || 'Game Complete!';
+                this.gameOverStats.textContent = "Score ".concat(details.score, "  ·  Level ").concat(details.level, "  ·  Best streak ").concat(details.bestStreak || 0);
+                this.nameEntryRow.style.display = details.showNameEntry ? 'flex' : 'none';
+                this.nameInput.value = '';
+                this.renderOverlayScores(details.highScores || []);
+                this.gameOverOverlay.classList.add('visible');
+                if (details.showNameEntry) {
+                    this.isCapturingText = true;
+                    setTimeout(function() {
+                        this.nameInput.focus();
+                    }.bind(this), 50);
+                } else {
+                    this.isCapturingText = false;
+                }
+            }
+        },
+        {
+            key: "refreshGameOverHighScores",
+            value: function refreshGameOverHighScores(scores) {
+                this.nameEntryRow.style.display = 'none';
+                this.isCapturingText = false;
+                this.renderOverlayScores(scores || loadHighScores());
+            }
+        },
+        {
+            key: "renderOverlayScores",
+            value: function renderOverlayScores(scores) {
+                var _this = this;
+                this.gameOverScores.innerHTML = '';
+                var heading = this.createText('High Scores', '12px', 'center');
+                heading.style.marginBottom = '8px';
+                this.gameOverScores.appendChild(heading);
+                if (!scores.length) {
+                    this.gameOverScores.appendChild(this.createText('You are first on the board.', '10px', 'center'));
+                    return;
+                }
+                scores.forEach(function(entry, index) {
+                    var row = document.createElement('div');
+                    row.textContent = "".concat(index + 1, ". ").concat(entry.name, "  ").concat(entry.score, "  L").concat(entry.level);
+                    _this.gameOverScores.appendChild(row);
+                });
+            }
+        },
+        {
+            key: "showPauseOverlay",
+            value: function showPauseOverlay() {
+                this.pauseOverlay.classList.add('visible');
+            }
+        },
+        {
+            key: "hidePauseOverlay",
+            value: function hidePauseOverlay() {
+                this.pauseOverlay.classList.remove('visible');
+            }
+        },
+        {
+            key: "hideOverlays",
+            value: function hideOverlays() {
+                this.hidePauseOverlay();
+                this.gameOverOverlay.classList.remove('visible');
+                this.isCapturingText = false;
             }
         },
         {

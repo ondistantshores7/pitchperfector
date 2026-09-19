@@ -74,9 +74,6 @@ export var Bullet = /*#__PURE__*/ function() {
         this.bulletLight.intensity = 2.0; // Increased intensity for better visibility
         this.mesh = new THREE.Mesh(geometry, material);
         // Initial state
-        if (Math.random() < 0.2) {
-            console.log("Bullet created at position:", startPosition.x.toFixed(2), startPosition.y.toFixed(2), startPosition.z.toFixed(2));
-        }
         // Set the mesh position using the provided startPosition (already at Z=-15)
         this.mesh.position.copy(startPosition);
         this.mesh.scale.set(BULLET_SCALE, BULLET_SCALE, BULLET_SCALE); // Larger initial scale
@@ -91,10 +88,6 @@ export var Bullet = /*#__PURE__*/ function() {
         // The velocity is now calculated in game.js and passed directly
         // Set the direction vector to match the actual velocity direction for visual effects
         this.directionVector = this.velocity.clone().normalize();
-        // Log the bullet creation details
-        if (Math.random() < 0.1) {
-            console.log("Bullet created with pre-calculated velocity:", this.velocity.x.toFixed(2), this.velocity.y.toFixed(2), "speed:", this.velocity.length().toFixed(2));
-        }
         // Set initial velocity values for the trail
         this.initialVelocity = this.velocity.clone();
         this.lifetime = 0;
@@ -107,10 +100,6 @@ export var Bullet = /*#__PURE__*/ function() {
         this.mesh.add(this.bulletLight);
         // Add debug indicator for bullet direction (only in development)
         this.addDebugDirectionIndicator();
-        if (Math.random() < 0.2) {
-            console.log("Bullet created at:", startPosition.x.toFixed(2), startPosition.y.toFixed(2), startPosition.z.toFixed(2));
-        // Removed angle and rocketTip logging as they are no longer used for velocity
-        }
     }
     _create_class(Bullet, [
         {
@@ -195,7 +184,6 @@ export var Bullet = /*#__PURE__*/ function() {
                 // Set scene reference to null last
                 this.scene = null;
                 this.camera = null;
-                console.log("Bullet completely destroyed");
                 // Clear extra references
                 this.initialVelocity = null;
             }

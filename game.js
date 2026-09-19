@@ -29,9 +29,11 @@ import { Bullet } from './Bullet.js'; // Import the Bullet class
 import { AnswerTarget } from './AnswerTarget.js'; // Import AnswerTarget
 import { CollisionManager } from './CollisionManager.js'; // Import CollisionManager
 import { TargetCollisionManager } from './TargetCollisionManager.js'; // Import TargetCollisionManager
-import { GAME_STATE, NOTES } from './constants.js'; // Import NOTES
+import { GAME_STATE, NOTES, THEME_MUSIC_URL } from './constants.js'; // Import NOTES
 import { ImpactEffect } from './ImpactEffect.js'; // Import ImpactEffect class
 import { Asteroid } from './Asteroid.js'; // Import the Asteroid class
+import { calculateStreakBonus, formatSolfegeDisplay } from './scoreUtils.js';
+import { isHighScore, loadHighScores, recordHighScore } from './highScores.js';
 import confetti from 'https://esm.sh/canvas-confetti@1.9.3';
 var MAX_ASTEROIDS = 7; // Maximum number of asteroids on screen (Reduced by approx half)
 export var Game = /*#__PURE__*/ function() {
@@ -42,9 +44,14 @@ export var Game = /*#__PURE__*/ function() {
         this.container = container;
         this.gameState = GAME_STATE.START_SCREEN;
         this.currentLevel = 1;
+        this.startingLevel = 1;
         this.score = 0;
+        this.streak = 0;
+        this.bestStreak = 0;
         this.currentQuestion = null; // { pattern: [note1, note2, note3], options: [opt1, opt2, opt3, opt4], correctAnswer: correctOpt }
         this.questionIndex = 0; // Index within the current level's questions
+        this._autoPlayToken = 0;
+        this._flameConfettiCooldown = 0;
         // Basic Three.js setup
         // Import and store createShootingStarMesh function
         var _setupScene = setupScene(container), scene = _setupScene.scene, camera = _setupScene.camera, renderer = _setupScene.renderer, stars = _setupScene.stars, createShootingStarMesh = _setupScene.createShootingStarMesh;
@@ -148,38 +155,54 @@ export var Game = /*#__PURE__*/ function() {
                 this.rocket.group.rotation.z = 0; // Point straight up for start screen visual
                 this.animate();
                 // Start loading and playing background music
-                this.audioManager.loadBackgroundMusic("https://play.rosebud.ai/assets/Pitch Perfector Theme.mp3?CFIc");
+                this.audioManager.loadBackgroundMusic(THEME_MUSIC_URL);
             }
         },
         {
             key: "startGame",
             value: function startGame() {
-                if (this.gameState === GAME_STATE.START_SCREEN) {
-                    this.audioManager.resumeContext(); // Ensure context is running before stopping/starting audio
-                    this.audioManager.stopBackgroundMusic(); // Stop the theme music
-                    this.gameState = GAME_STATE.PLAYING;
-                    this.score = 0;
-                    this.questionIndex = 0;
-                    this.ui.showGameScreen(this.currentLevel, this.score);
-                    this.piano.show();
-                    this.rocket.show(); // Show the rocket when game starts
-                    // Set the rocket's Z position deeper than the answer targets
-                    this.rocket.group.position.z = -25; // Further behind the answer targets (which are at z=-15)
-                    // Ensure piano is visible regardless of previous toggle state
-                    this.piano.show();
-                    // --- Spawn Initial Asteroids ---
-                    this.clearAsteroids(); // Ensure no old ones remain
-                    for(var i = 0; i < MAX_ASTEROIDS / 2; i++){
-                        this.spawnAsteroid();
-                    }
-                    this.loadNextQuestion();
+                var allowedStates = [
+                    GAME_STATE.START_SCREEN,
+                    GAME_STATE.GAME_OVER,
+                    GAME_STATE.HIGH_SCORE_ENTRY,
+                    GAME_STATE.PAUSED
+                ];
+                if (allowedStates.indexOf(this.gameState) === -1) {
+                    return;
                 }
+                var fromMenu = this.gameState === GAME_STATE.START_SCREEN;
+                this.audioManager.resumeContext(); // Ensure context is running before stopping/starting audio
+                this.audioManager.stopBackgroundMusic(); // Stop the theme music
+                this.audioManager.stopPattern();
+                this.gameState = GAME_STATE.PLAYING;
+                if (fromMenu) {
+                    this.startingLevel = parseInt(this.ui.levelSelect.value, 10) || this.currentLevel || 1;
+                }
+                this.currentLevel = this.startingLevel || this.currentLevel || 1;
+                this.score = 0;
+                this.streak = 0;
+                this.bestStreak = 0;
+                this.questionIndex = 0;
+                this.keysPressed = {};
+                this.clearAnswerTargets();
+                this.clearAsteroids();
+                this.clearBullets();
+                this.ui.hideOverlays();
+                this.ui.showGameScreen(this.currentLevel, this.score);
+                this.ui.updateStats(this.getHudStats());
+                this.piano.show();
+                this.rocket.show(); // Show the rocket when game starts
+                // Set the rocket's Z position deeper than the answer targets
+                this.rocket.group.position.z = -25; // Further behind the answer targets (which are at z=-15)
+                for(var i = 0; i < MAX_ASTEROIDS / 2; i++){
+                    this.spawnAsteroid();
+                }
+                this.loadNextQuestion();
             }
         },
         {
             key: "selectLevel",
             value: function selectLevel(level) {
-                console.log("Level ".concat(level, " selected"));
                 this.currentLevel = parseInt(level, 10);
                 // If already playing, jump to the new level, keep the score
                 if (this.gameState === GAME_STATE.PLAYING) {
@@ -189,6 +212,7 @@ export var Game = /*#__PURE__*/ function() {
                     this.ui.updateLevel(this.currentLevel);
                     this.loadNextQuestion();
                 } else if (this.gameState === GAME_STATE.START_SCREEN) {
+                    this.startingLevel = this.currentLevel;
                     this.ui.updateLevel(this.currentLevel); // Update dropdown visual
                 }
             }
@@ -209,7 +233,9 @@ export var Game = /*#__PURE__*/ function() {
                     var patternNoteDuration = 0.8; // Double the default
                     var patternGapDuration = 0.3; // Slightly longer gap between notes
                     this.audioManager.playPattern(patternData, // Pass piano highlighting callback if highlighting is enabled, otherwise null
-                    this.ui.pianoHighlighting ? this.piano.highlightKey.bind(this.piano) : null, patternNoteDuration, patternGapDuration);
+                    this.ui.pianoHighlighting ? this.piano.highlightKey.bind(this.piano) : null, patternNoteDuration, patternGapDuration, {
+                        force: true
+                    });
                 }
             }
         },
@@ -219,6 +245,10 @@ export var Game = /*#__PURE__*/ function() {
                 if (!this.currentQuestion || this.gameState !== GAME_STATE.PLAYING) return;
                 var _this_levelManager_getScoring = this.levelManager.getScoring(this.currentLevel), pointsCorrect = _this_levelManager_getScoring.pointsCorrect, pointsIncorrect = _this_levelManager_getScoring.pointsIncorrect;
                 var correctAnswer = this.currentQuestion.correctAnswer;
+                var matchingTarget = this.findAnswerTarget(selectedAnswer);
+                if (!buttonElement) {
+                    buttonElement = this.ui.getButtonForOption(selectedAnswer);
+                }
                 // Always play the selected pattern audio, regardless of piano highlighting state
                 var tonicNote = this.currentQuestion.patternNames[0];
                 var selectedNotes = this.levelManager.solfegeStringToNotes(selectedAnswer, tonicNote);
@@ -237,60 +267,60 @@ export var Game = /*#__PURE__*/ function() {
                     });
                     // If piano highlighting is enabled, pass the highlighting callback, otherwise null
                     var highlightCallback = this.ui.pianoHighlighting ? this.piano.highlightKey.bind(this.piano) : null;
-                    this.audioManager.playPattern(selectedPatternData, highlightCallback, 0.6, 0.15);
+                    this.audioManager.playPattern(selectedPatternData, highlightCallback, 0.6, 0.15, {
+                        force: true
+                    });
                 }
                 if (selectedAnswer === correctAnswer) {
                     // --- Correct Answer ---
-                    // Always play sound and animation on every correct click
                     this.audioManager.playCorrectSound();
                     this.triggerCorrectAnimation(); // Confetti
-                    this.ui.showFeedback('Correct!', true); // Show momentary feedback text
+                    this.ui.highlightCorrectOption(correctAnswer);
+                    if (matchingTarget) {
+                        matchingTarget.hit(true);
+                    }
                     // Only update score and reveal 'Next' button on the *first* correct selection
-                    if (this.ui.nextPatternButton.style.visibility !== 'visible') {
-                        this.score += pointsCorrect;
-                        console.log("Correct! (First time)");
+                    if (!this.hasSolvedCurrentQuestion()) {
+                        this.streak += 1;
+                        this.bestStreak = Math.max(this.bestStreak, this.streak);
+                        var bonus = calculateStreakBonus(this.streak, pointsCorrect);
+                        this.score += pointsCorrect + bonus;
                         this.ui.updateScore(this.score);
-                        // Highlight the correct button persistently
-                        this.ui.highlightCorrectButton(buttonElement);
-                        // Show the "Next Pattern" button to allow progression
+                        this.ui.updateStats(this.getHudStats());
+                        this.ui.showFeedback(bonus ? "Correct! +".concat(pointsCorrect, " (+").concat(bonus, " streak)") : 'Correct!', true);
                         this.ui.showNextPatternButton();
                     } else {
-                        console.log("Correct! (Already answered)");
-                        // Optionally re-highlight if needed, though highlightCorrectButton should be persistent
-                        this.ui.highlightCorrectButton(buttonElement);
+                        this.ui.showFeedback('Correct!', true);
                     }
                 // Do NOT advance question here - that happens when "Next Pattern" is clicked
                 } else {
                     // --- Incorrect Answer ---
-                    if (buttonElement.dataset.eliminated === 'true') {
-                        // Even if already eliminated, play sounds and show animations again
+                    if (this.hasSolvedCurrentQuestion()) {
                         this.audioManager.playIncorrectSound();
-                        this.triggerIncorrectButtonAnimation(buttonElement);
-                        // Note: We don't need to play the pattern here again since it's handled at the beginning of the method
-                        this.ui.showFeedback('Incorrect! Try again.', false);
+                        this.ui.showFeedback('Already solved — hit Next Pattern.', false);
                         return;
                     }
-                    // First time incorrect selection for this button
-                    buttonElement.dataset.eliminated = 'true'; // Mark as eliminated
-                    this.score = Math.max(0, this.score + pointsIncorrect);
-                    // Play incorrect sound if pattern wasn't already played at the beginning
-                    if (!this.ui.pianoHighlighting) {
-                        this.audioManager.playIncorrectSound();
-                    }
-                    // Show red text/border feedback
+                    var alreadyEliminated = buttonElement && buttonElement.dataset.eliminated === 'true' || matchingTarget && matchingTarget.hasBeenScored;
+                    this.audioManager.playIncorrectSound();
+                    this.streak = 0;
+                    this.ui.updateStats(this.getHudStats());
                     this.ui.showFeedback('Incorrect! Try again.', false);
-                    // Trigger animation effects
-                    this.triggerIncorrectButtonAnimation(buttonElement);
-                    console.log("Incorrect!");
+                    if (buttonElement) {
+                        this.triggerIncorrectButtonAnimation(buttonElement);
+                    }
+                    if (alreadyEliminated) {
+                        return;
+                    }
+                    if (buttonElement) {
+                        buttonElement.dataset.eliminated = 'true';
+                    }
+                    this.ui.markEliminatedOption(selectedAnswer);
+                    if (matchingTarget) {
+                        matchingTarget.hasBeenScored = true;
+                        matchingTarget.hit(false);
+                    }
+                    this.score = Math.max(0, this.score + pointsIncorrect);
                     this.ui.updateScore(this.score);
-                // Do NOT disable the incorrect button
-                // if (buttonElement) {
-                //     buttonElement.disabled = true;
-                //     buttonElement.style.opacity = '0.5'; // Visually indicate it's disabled
-                //     buttonElement.style.cursor = 'not-allowed';
-                //     // TODO: Add explosion effect here later
-                // }
-                // Do NOT advance question index or load next question
                 }
             }
         },
@@ -299,6 +329,7 @@ export var Game = /*#__PURE__*/ function() {
             key: "proceedToNextQuestion",
             value: function proceedToNextQuestion() {
                 if (this.gameState !== GAME_STATE.PLAYING) return;
+                this.audioManager.stopPattern();
                 this.questionIndex++;
                 var levelUpThreshold = this.levelManager.getLevelUpThreshold(this.currentLevel);
                 if (this.score >= levelUpThreshold && this.currentLevel < 10) {
@@ -309,13 +340,7 @@ export var Game = /*#__PURE__*/ function() {
                         // Didn't score enough, but finished questions - level up anyway for now
                         this.levelUp();
                     } else {
-                        // Finished Level 10
-                        this.ui.showFeedback("Level 10 Complete!", true); // Or game over screen
-                        this.gameState = GAME_STATE.GAME_OVER;
-                        // TODO: Implement a proper game over screen/flow
-                        setTimeout(function() {
-                            return window.location.reload();
-                        }, 3000); // Temp reset
+                        this.endGame('Level 10 Complete!');
                     }
                 } else {
                     // Load the next question within the current level
@@ -349,7 +374,6 @@ export var Game = /*#__PURE__*/ function() {
                 this.clearAnswerTargets();
                 this.currentQuestion = this.levelManager.generateQuestion(this.currentLevel);
                 if (this.currentQuestion) {
-                    console.log("New Question:", this.currentQuestion);
                     this.ui.resetAnswerButtonHighlights(); // Ensure buttons are reset before displaying new ones
                     this.ui.displayQuestion(this.currentQuestion.options); // Displays UI buttons
                     // --- Create new Answer Targets in 3D space ---
@@ -359,14 +383,10 @@ export var Game = /*#__PURE__*/ function() {
                     answerButtons.forEach(function(button) {
                         button.dataset.selected = 'false';
                     });
+                    this.scheduleAutoPlay();
+                    this.ui.updateStats(this.getHudStats());
                 } else {
-                    // Handle case where no more questions can be generated (e.g., max level reached)
-                    this.ui.showFeedback("Game Complete!", true);
-                    this.gameState = GAME_STATE.GAME_OVER; // Or back to start
-                    setTimeout(function() {
-                        // Maybe show a final score screen or go back to start
-                        window.location.reload(); // Simple reset for now
-                    }, 3000);
+                    this.endGame('Game Complete!');
                 }
             }
         },
@@ -482,13 +502,133 @@ export var Game = /*#__PURE__*/ function() {
             }
         },
         {
-            // Placeholder for future high score feature
+            key: "hasSolvedCurrentQuestion",
+            value: function hasSolvedCurrentQuestion() {
+                return this.ui && this.ui.nextPatternButton && this.ui.nextPatternButton.style.visibility === 'visible';
+            }
+        },
+        {
+            key: "getHudStats",
+            value: function getHudStats() {
+                return {
+                    question: this.questionIndex + 1,
+                    total: this.levelManager.getQuestionsPerLevel(),
+                    streak: this.streak,
+                    muted: this.audioManager.muted
+                };
+            }
+        },
+        {
+            key: "findAnswerTarget",
+            value: function findAnswerTarget(solfegeText) {
+                return this.answerTargets.find(function(target) {
+                    return target.solfegeText === solfegeText || target.originalSolfegeText === solfegeText;
+                }) || null;
+            }
+        },
+        {
+            key: "clearBullets",
+            value: function clearBullets() {
+                this.bullets.forEach(function(bullet) {
+                    if (bullet && bullet.isAlive) bullet.destroy();
+                });
+                this.bullets = [];
+            }
+        },
+        {
+            key: "scheduleAutoPlay",
+            value: function scheduleAutoPlay() {
+                var _this = this;
+                this._autoPlayToken += 1;
+                var token = this._autoPlayToken;
+                setTimeout(function() {
+                    if (_this._autoPlayToken === token && _this.gameState === GAME_STATE.PLAYING) {
+                        _this.playCurrentPattern();
+                    }
+                }, 350);
+            }
+        },
+        {
+            key: "endGame",
+            value: function endGame(message) {
+                this.audioManager.stopPattern();
+                this.clearBullets();
+                this.ui.hideNextPatternButton();
+                var scores = loadHighScores();
+                var qualifies = isHighScore(this.score, scores);
+                this.gameState = qualifies ? GAME_STATE.HIGH_SCORE_ENTRY : GAME_STATE.GAME_OVER;
+                this.ui.showGameOverScreen({
+                    title: message || 'Game Complete!',
+                    score: this.score,
+                    level: this.currentLevel,
+                    bestStreak: this.bestStreak,
+                    highScores: scores,
+                    showNameEntry: qualifies
+                });
+                this.audioManager.playCorrectSound();
+            }
+        },
+        {
+            key: "submitHighScore",
+            value: function submitHighScore(name) {
+                var scores = recordHighScore({
+                    name: name,
+                    score: this.score,
+                    level: this.currentLevel,
+                    date: new Date().toISOString()
+                });
+                this.gameState = GAME_STATE.GAME_OVER;
+                this.ui.refreshGameOverHighScores(scores);
+            }
+        },
+        {
+            key: "returnToMenu",
+            value: function returnToMenu() {
+                this.audioManager.stopPattern();
+                this.gameState = GAME_STATE.START_SCREEN;
+                this.currentLevel = this.startingLevel || this.currentLevel || 1;
+                this.ui.updateLevel(this.currentLevel);
+                this.keysPressed = {};
+                this.clearAnswerTargets();
+                this.clearAsteroids();
+                this.clearBullets();
+                this.piano.hide();
+                this.ui.hideOverlays();
+                this.ui.showStartScreen();
+                this.rocket.show();
+                this.rocket.group.position.set(0, 4.5, -20);
+                this.rocket.group.rotation.z = 0;
+                this.audioManager.loadBackgroundMusic(THEME_MUSIC_URL);
+            }
+        },
+        {
+            key: "togglePause",
+            value: function togglePause() {
+                if (this.gameState === GAME_STATE.PLAYING) {
+                    this.gameState = GAME_STATE.PAUSED;
+                    this.keysPressed = {};
+                    this.rocket.isThrusting = false;
+                    this.ui.showPauseOverlay();
+                } else if (this.gameState === GAME_STATE.PAUSED) {
+                    this.gameState = GAME_STATE.PLAYING;
+                    this.ui.hidePauseOverlay();
+                }
+            }
+        },
+        {
+            key: "toggleMute",
+            value: function toggleMute() {
+                this.audioManager.toggleMute();
+                this.ui.updateMuteButton(this.audioManager.muted);
+                this.ui.updateStats(this.getHudStats());
+            }
+        },
+        {
+            // Placeholder kept for older UI hooks
             key: "enterHighScore",
             value: function enterHighScore() {
-                if (this.gameState === GAME_STATE.PLAYING || this.gameState === GAME_STATE.GAME_OVER) {
-                    alert("High Score Feature - Not fully implemented yet.\nCurrent Score: ".concat(this.score, "\nCurrent Level: ").concat(this.currentLevel));
-                // In a full implementation, this would show a modal/form
-                // to enter initials/grade and save to localStorage.
+                if (this.gameState === GAME_STATE.PLAYING) {
+                    this.endGame('High Score Check');
                 }
             }
         },
@@ -555,6 +695,22 @@ export var Game = /*#__PURE__*/ function() {
                 this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
                 // Update the picking ray with the camera and mouse position
                 this.raycaster.setFromCamera(this.mouse, this.camera);
+                if (this.gameState === GAME_STATE.PLAYING) {
+                    var targetSprites = this.answerTargets.filter(function(target) {
+                        return !!target.sprite;
+                    }).map(function(target) {
+                        return target.sprite;
+                    });
+                    var targetHits = targetSprites.length ? this.raycaster.intersectObjects(targetSprites) : [];
+                    if (targetHits.length > 0) {
+                        var hitTarget = targetHits[0].object.userData.answerTarget;
+                        if (hitTarget) {
+                            this.audioManager.playClickSound();
+                            this.submitAnswer(hitTarget.solfegeText, this.ui.getButtonForOption(hitTarget.solfegeText));
+                            return;
+                        }
+                    }
+                }
                 // Calculate objects intersecting the picking ray
                 var intersects = this.raycaster.intersectObjects(this.piano.getKeys()); // Only check piano keys
                 if (intersects.length > 0) {
@@ -571,21 +727,52 @@ export var Game = /*#__PURE__*/ function() {
             // --- Keyboard Handlers for Rocket ---
             key: "onKeyDown",
             value: function onKeyDown(event) {
+                if (this.ui && this.ui.isCapturingText) {
+                    return;
+                }
                 this.keysPressed[event.key] = true;
-                // Prevent default browser behavior for arrow keys and spacebar if needed
-                // if (['ArrowUp', 'ArrowLeft', 'ArrowRight', ' '].includes(event.key)) {
-                //     event.preventDefault();
-                // }
-                // --- Debug Toggles REMOVED ---
-                // if (event.key === 'd' || event.key === 'D') {
-                //     this.debugTipMarkerVisible = !this.debugTipMarkerVisible;
-                //     console.log(`Debug Tip Marker Visibility: ${this.debugTipMarkerVisible}`);
-                //     // Update the rocket's marker visibility immediately
-                //     this.rocket.setTipMarkerVisibility(this.debugTipMarkerVisible);
-                // }
+                this.keysPressed[event.code] = true;
+                var controlCodes = [
+                    'ArrowUp',
+                    'ArrowDown',
+                    'ArrowLeft',
+                    'ArrowRight',
+                    'Space'
+                ];
+                if (controlCodes.indexOf(event.code) !== -1 || event.key === ' ') {
+                    event.preventDefault();
+                }
+                if (event.repeat) return;
+                if (event.code === 'Escape') {
+                    if (this.gameState === GAME_STATE.PLAYING || this.gameState === GAME_STATE.PAUSED) {
+                        this.togglePause();
+                    }
+                    return;
+                }
+                if (event.code === 'KeyM') {
+                    this.toggleMute();
+                    return;
+                }
+                if (this.gameState === GAME_STATE.START_SCREEN && (event.code === 'Enter' || event.code === 'Space')) {
+                    this.audioManager.playCorrectSound();
+                    this.startGame();
+                    return;
+                }
+                if (this.gameState === GAME_STATE.PAUSED && event.code === 'Enter') {
+                    this.togglePause();
+                    return;
+                }
+                if (this.gameState !== GAME_STATE.PLAYING) return;
+                if (event.code === 'KeyP') {
+                    this.playCurrentPattern();
+                    return;
+                }
+                if (event.code === 'Enter' && this.hasSolvedCurrentQuestion()) {
+                    this.proceedToNextQuestion();
+                    return;
+                }
                 // --- Shooting Logic ---
-                if (event.code === 'Space' && this.gameState === GAME_STATE.PLAYING && this.shootTimer <= 0) {
-                    console.log("Space pressed - Firing bullet");
+                if (event.code === 'Space' && this.shootTimer <= 0) {
                     // --- FIRING LOGIC Using Current Rocket State ---
                     // Ensure the rocket's world matrix is up-to-date based on the *last* animation frame
                     this.rocket.group.updateMatrixWorld(true);
@@ -600,19 +787,10 @@ export var Game = /*#__PURE__*/ function() {
                     var directionVector = new THREE.Vector3(Math.cos(fireAngle), Math.sin(fireAngle), 0).normalize();
                     // 3) Calculate Velocity Vector
                     var bulletVelocity = directionVector.clone().multiplyScalar(Bullet.BULLET_SPEED || 24.0);
-                    // --- DEBUG LOG ---
-                    if (Math.random() < 0.5) {
-                        console.log("-- Firing Bullet (Current State Method) --");
-                        console.log("Rotation Z: ".concat(currentRotationZ.toFixed(3)));
-                        console.log("Fire Angle (rad): ".concat(fireAngle.toFixed(3)));
-                        console.log("Start Pos: (".concat(startPos.x.toFixed(2), ", ").concat(startPos.y.toFixed(2), ")"));
-                        console.log("Direction Vector: (".concat(directionVector.x.toFixed(3), ", ").concat(directionVector.y.toFixed(3), ")"));
-                        console.log("Calculated Velocity: (".concat(bulletVelocity.x.toFixed(3), ", ").concat(bulletVelocity.y.toFixed(3), ")"));
-                    }
-                    // --- END DEBUG LOG ---
                     // 4) Spawn bullet
                     var bullet = new Bullet(startPos, bulletVelocity, this.scene, this.camera);
                     this.bullets.push(bullet);
+                    this.audioManager.playShootSound();
                     // 5) Reset cooldown
                     this.shootTimer = this.shootCooldown;
                     // Optional kickback (using the same current fire angle)
@@ -626,6 +804,7 @@ export var Game = /*#__PURE__*/ function() {
             key: "onKeyUp",
             value: function onKeyUp(event) {
                 this.keysPressed[event.key] = false;
+                this.keysPressed[event.code] = false;
             }
         },
         {
@@ -636,18 +815,13 @@ export var Game = /*#__PURE__*/ function() {
                 // Animate stars
                 this.stars.rotation.y += delta * 0.01;
                 this.stars.rotation.x += delta * 0.005;
+                if (this.gameState === GAME_STATE.PAUSED) {
+                    this.renderer.render(this.scene, this.camera);
+                    return;
+                }
                 // --- Rocket Control (Update regardless of game state) ---
                 // Process input if the rocket is visible
                 if (this.rocket.group.visible) {
-                    if (this.keysPressed['ArrowUp']) {
-                        this.rocket.thrust(delta);
-                    }
-                    if (this.keysPressed['ArrowLeft']) {
-                        this.rocket.turnLeft(delta);
-                    }
-                    if (this.keysPressed['ArrowRight']) {
-                        this.rocket.turnRight(delta);
-                    }
                     this.rocket.update(delta, this.keysPressed); // Update rocket state
                 }
                 // --- Shooting Star Logic ---
@@ -709,7 +883,6 @@ export var Game = /*#__PURE__*/ function() {
                         var maxDistanceY = visibleHeightAtTarget / 2 * offScreenFactor;
                         // Check if bullet is beyond these boundaries
                         if (Math.abs(bullet.mesh.position.x) > maxDistanceX || Math.abs(bullet.mesh.position.y) > maxDistanceY) {
-                            console.log("Bullet went too far off-screen, destroying. Position:", bullet.mesh.position.x.toFixed(2), bullet.mesh.position.y.toFixed(2));
                             bullet.destroy(); // Assumes destroy() sets isAlive = false and cleans up the THREE.js mesh
                         }
                     }
@@ -760,7 +933,13 @@ export var Game = /*#__PURE__*/ function() {
                 this.renderer.render(this.scene, this.camera);
                 // --- Rocket Flame Confetti ---
                 if (this.rocket.isThrusting && this.rocket.group.visible) {
-                    this.triggerFlameConfetti();
+                    this._flameConfettiCooldown -= delta;
+                    if (this._flameConfettiCooldown <= 0) {
+                        this.triggerFlameConfetti();
+                        this._flameConfettiCooldown = 0.07;
+                    }
+                } else {
+                    this._flameConfettiCooldown = 0;
                 }
             }
         },
@@ -773,7 +952,7 @@ export var Game = /*#__PURE__*/ function() {
                 var displayMode = this.ui.displayMode; // Get current display mode from UI
                 var tonicNote = (_this_currentQuestion = this.currentQuestion) === null || _this_currentQuestion === void 0 ? void 0 : _this_currentQuestion.patternNames[0];
                 options.forEach(function(solfegeOption, index) {
-                    var displayText = solfegeOption; // Default to Solfege
+                    var displayText = formatSolfegeDisplay(solfegeOption); // Default to Solfege
                     // Determine display text based on UI mode (similar logic to ui.displayQuestion)
                     if (displayMode === 'pitch' && tonicNote) {
                         var notesArray = _this.levelManager.solfegeStringToNotes(solfegeOption, tonicNote);
@@ -870,7 +1049,6 @@ export var Game = /*#__PURE__*/ function() {
         {
             key: "triggerFlameConfetti",
             value: function triggerFlameConfetti() {
-                console.log("Attempting to trigger flame confetti..."); // Log entry
                 // Calculate the flame origin point slightly below the rocket's center, in world space
                 // Get angle directly from visual rotation
                 var angle = this.rocket.group.rotation.z + Math.PI / 2;
@@ -879,11 +1057,8 @@ export var Game = /*#__PURE__*/ function() {
                 var flameWorldPos = this.rocket.group.position.clone().add(flameOriginOffset);
                 // Convert world position to screen coordinates for confetti
                 var origin = this.worldToScreen(flameWorldPos);
-                console.log("Calculated Confetti Origin (Screen %):", origin); // Log origin
-                console.log("Rocket Angle (Rad):", angle); // Log rocket angle
                 // Calculate confetti ejection angle (opposite to rocket thrust direction)
                 var ejectionAngleDegrees = (angle + Math.PI) * 180 / Math.PI % 360;
-                console.log("Confetti Ejection Angle (Deg):", ejectionAngleDegrees); // Log ejection angle
                 // Fire confetti
                 this.customConfetti({
                     particleCount: 8,

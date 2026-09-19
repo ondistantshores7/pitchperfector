@@ -38,10 +38,6 @@ export var CollisionManager = /*#__PURE__*/ function() {
                     console.warn("Bullet missing previousPosition");
                     return false;
                 }
-                // Debug visualization - add a small marker at bullet position
-                if (Math.random() < 0.1) {
-                    console.log("Bullet position: ".concat(bullet.mesh.position.x.toFixed(2), ", ").concat(bullet.mesh.position.y.toFixed(2), ", ").concat(bullet.mesh.position.z.toFixed(2)));
-                }
                 // Calculate bullet's movement vector for this frame
                 var bulletMoveVector = new THREE.Vector3().subVectors(bullet.mesh.position, bullet.previousPosition);
                 var bulletMoveDistance = bulletMoveVector.length();
@@ -63,12 +59,6 @@ export var CollisionManager = /*#__PURE__*/ function() {
                     }
                     // Check for intersection with the target's bounding box
                     var intersectionPoint = new THREE.Vector3();
-                    // Debug visualization reduced to avoid console spam
-                    if (Math.random() < 0.05) {
-                        console.log("Bullet position: ".concat(bullet.mesh.position.x.toFixed(2), ", ").concat(bullet.mesh.position.y.toFixed(2), ", ").concat(bullet.mesh.position.z.toFixed(2)));
-                        console.log("Target position: ".concat(target.sprite.position.x.toFixed(2), ", ").concat(target.sprite.position.y.toFixed(2), ", ").concat(target.sprite.position.z.toFixed(2)));
-                        console.log("Target bounding box: min(".concat(target.boundingBox.min.x.toFixed(2), ", ").concat(target.boundingBox.min.y.toFixed(2), ", ").concat(target.boundingBox.min.z.toFixed(2), ") max(").concat(target.boundingBox.max.x.toFixed(2), ", ").concat(target.boundingBox.max.y.toFixed(2), ", ").concat(target.boundingBox.max.z.toFixed(2), ")"));
-                    }
                     // With bullets and targets on the same Z plane, we can use a much simpler 2D distance check
                     // Get the target's center position
                     var targetCenter = new THREE.Vector2(target.sprite.position.x, target.sprite.position.y);
@@ -83,12 +73,6 @@ export var CollisionManager = /*#__PURE__*/ function() {
                     var halfHeight = targetHeight / 2 + bulletRadius;
                     // Calculate distance from bullet to target center
                     var distanceToTarget = bulletPos2D.distanceTo(targetCenter);
-                    // Log distance data occasionally for debugging
-                    if (Math.random() < 0.05) {
-                        console.log("Target: ".concat(target.solfegeText, ", Distance: ").concat(distanceToTarget.toFixed(2)));
-                        console.log("Target dimensions: ".concat(targetWidth.toFixed(2), " x ").concat(targetHeight.toFixed(2)));
-                        console.log("Hit area: ".concat(halfWidth.toFixed(2), " x ").concat(halfHeight.toFixed(2)));
-                    }
                     // First do a quick circle-based check using the distance to center
                     // This is faster than box checks and catches most hits
                     if (distanceToTarget < Math.max(halfWidth, halfHeight)) {
@@ -113,7 +97,7 @@ export var CollisionManager = /*#__PURE__*/ function() {
                             var impactPosition = target.sprite.position.clone();
                             var impactEffect = new ImpactEffect(this.game.scene, impactPosition, isCorrect);
                             this.game.impactEffects.push(impactEffect);
-                            // Handle game state updates
+                            // Handle game state updates through the same path as UI buttons
                             this.handleTargetHit(target, isCorrect);
                             // Ensure the bullet is completely destroyed and all references are gone
                             bullet.isAlive = false;
@@ -140,18 +124,6 @@ export var CollisionManager = /*#__PURE__*/ function() {
                             // The target.hit() method will handle visual feedback.
                             // Correct targets will still be visually distinct (e.g., different color/effect),
                             // and the game state advancement is handled in handleTargetHit based on the "Next" button visibility.
-                            // Also trigger UI feedback that matches the stationary buttons
-                            // The audioManager.playPatternForTarget will play the appropriate sound and pattern
-                            // based on whether the target is correct or not.
-                            // Use target.originalSolfegeText to ensure pure solfege is passed.
-                            this.game.audioManager.playPatternForTarget(target.originalSolfegeText, isCorrect, /* onPlayCallback */ null);
-                            if (!isCorrect) {
-                                // For incorrect hits, create a red explosion similar to stationary answers
-                                this.game.triggerIncorrectAnimation(target.sprite.position);
-                            } else {
-                                // For correct hits, trigger the correct animation
-                                this.game.triggerCorrectAnimation();
-                            }
                             return true;
                         }
                     }
@@ -188,7 +160,6 @@ export var CollisionManager = /*#__PURE__*/ function() {
                     var collisionDistanceSq = collisionRadius * collisionRadius;
                     if (distanceSq < collisionDistanceSq) {
                         // Collision detected!
-                        console.log("Bullet hit Asteroid!");
                         // Trigger asteroid hit logic (handles removal timer)
                         asteroid.hit();
                         // Trigger confetti explosion at asteroid position
@@ -236,32 +207,11 @@ export var CollisionManager = /*#__PURE__*/ function() {
         {
             key: "handleTargetHit",
             value: function handleTargetHit(target, isCorrect) {
-                var _this_game_levelManager_getScoring = this.game.levelManager.getScoring(this.game.currentLevel), pointsCorrect = _this_game_levelManager_getScoring.pointsCorrect, pointsIncorrect = _this_game_levelManager_getScoring.pointsIncorrect;
-                if (isCorrect) {
-                    // Only update game state if this is the first correct hit
-                    // Check if the "Next" button isn't visible yet (first correct hit for this question)
-                    if (this.game.ui.nextPatternButton.style.visibility !== 'visible') {
-                        // First correct hit logic: Update score, show button, etc.
-                        // this.game.audioManager.playCorrectSound(); // Removed: playPatternForTarget handles audio
-                        this.game.triggerCorrectAnimation(); // Confetti
-                        this.game.ui.showFeedback('Correct!', true);
-                        this.game.score += pointsCorrect;
-                        this.game.ui.updateScore(this.game.score);
-                        this.game.ui.showNextPatternButton();
-                    } else {
-                        // Subsequent correct hits: Only play sound/confetti, don't change game state again
-                        // this.game.audioManager.playCorrectSound(); // Removed: playPatternForTarget handles audio
-                        this.game.triggerCorrectAnimation(); // Still trigger confetti
-                    // Optionally show brief feedback again
-                    // this.game.ui.showFeedback('Correct!', true, 500); // Shorter duration maybe?
-                    }
-                } else {
-                    // Always play sound and trigger animation for every incorrect hit
-                    // this.game.audioManager.playIncorrectSound(); // Removed: playPatternForTarget handles audio
+                var optionText = target.solfegeText || target.originalSolfegeText;
+                var button = this.game.ui.getButtonForOption(optionText);
+                this.game.submitAnswer(optionText, button);
+                if (!isCorrect && target.sprite) {
                     this.game.triggerIncorrectAnimation(target.sprite.position);
-                    this.game.ui.showFeedback('Incorrect!', false);
-                    this.game.score = Math.max(0, this.game.score + pointsIncorrect);
-                    this.game.ui.updateScore(this.game.score);
                 }
             }
         }
