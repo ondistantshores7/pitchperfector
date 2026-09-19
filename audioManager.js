@@ -173,9 +173,18 @@ export var AudioManager = /*#__PURE__*/ function() {
         this.game = gameInstance; // Store game instance
         this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
         this.isPlaying = false;
-        this.gainNode = this.audioContext.createGain(); // Main gain for notes/SFX
-        this.gainNode.gain.setValueAtTime(0.3, this.audioContext.currentTime);
-        this.gainNode.connect(this.audioContext.destination);
+        this.playbackToken = 0;
+        this.activeNotes = [];
+        this.muted = false;
+        this.masterGain = this.audioContext.createGain();
+        this.masterGain.connect(this.audioContext.destination);
+        this.notesGain = this.audioContext.createGain();
+        this.notesGain.gain.setValueAtTime(0.85, this.audioContext.currentTime);
+        this.notesGain.connect(this.masterGain);
+        this.sfxGain = this.audioContext.createGain();
+        this.sfxGain.gain.setValueAtTime(0.9, this.audioContext.currentTime);
+        this.sfxGain.connect(this.masterGain);
+        this.gainNode = this.notesGain; // Back-compat alias for older callers
         this.backgroundMusicSource = null; // Reference to the background music node
         this.backgroundGainNode = this.audioContext.createGain(); // Separate gain for background music
         this.backgroundGainNode.gain.setValueAtTime(0.15, this.audioContext.currentTime); // Lower volume for BGM
@@ -184,9 +193,10 @@ export var AudioManager = /*#__PURE__*/ function() {
         this.backgroundLowPassFilter.type = 'lowpass';
         this.backgroundLowPassFilter.frequency.setValueAtTime(3000, this.audioContext.currentTime); // Cut frequencies above 3kHz
         this.backgroundLowPassFilter.Q.setValueAtTime(1, this.audioContext.currentTime); // Standard resonance
-        // Connect Filter -> Gain -> Destination
+        // Connect Filter -> Gain -> Master
         this.backgroundLowPassFilter.connect(this.backgroundGainNode);
-        this.backgroundGainNode.connect(this.audioContext.destination);
+        this.backgroundGainNode.connect(this.masterGain);
+        this.applyStoredMute();
     }
     _create_class(AudioManager, [
         {
@@ -199,8 +209,67 @@ export var AudioManager = /*#__PURE__*/ function() {
             }
         },
         {
+            key: "applyStoredMute",
+            value: function applyStoredMute() {
+                try {
+                    this.setMuted(localStorage.getItem('pitchPerfector.muted') === '1', true);
+                } catch (error) {
+                    this.setMuted(false, true);
+                }
+            }
+        },
+        {
+            key: "setMuted",
+            value: function setMuted(muted) {
+                var skipPersist = arguments.length > 1 && arguments[1] !== void 0 ? arguments[1] : false;
+                this.muted = !!muted;
+                if (this.masterGain) {
+                    this.masterGain.gain.setValueAtTime(this.muted ? 0 : 1, this.audioContext.currentTime);
+                }
+                if (!skipPersist) {
+                    try {
+                        localStorage.setItem('pitchPerfector.muted', this.muted ? '1' : '0');
+                    } catch (error) {
+                    // Ignore quota / private-mode failures
+                    }
+                }
+                return this.muted;
+            }
+        },
+        {
+            key: "toggleMute",
+            value: function toggleMute() {
+                return this.setMuted(!this.muted);
+            }
+        },
+        {
+            key: "stopPattern",
+            value: function stopPattern() {
+                var _this = this;
+                this.playbackToken = (this.playbackToken || 0) + 1;
+                this.isPlaying = false;
+                var now = this.audioContext.currentTime;
+                this.activeNotes.slice().forEach(function(voice) {
+                    try {
+                        voice.gain.gain.cancelScheduledValues(now);
+                        voice.gain.gain.setValueAtTime(Math.max(voice.gain.gain.value, 0.0001), now);
+                        voice.gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.03);
+                        voice.oscillator.stop(now + 0.04);
+                    } catch (error) {
+                    // Already stopped
+                    }
+                });
+                this.activeNotes = [];
+                if (this._patternResetTimer) {
+                    clearTimeout(this._patternResetTimer);
+                    this._patternResetTimer = null;
+                }
+            }
+        },
+        {
             key: "playNote",
             value: function playNote(noteName, frequency) {
+                var _this = this;
                 var duration = arguments.length > 2 && arguments[2] !== void 0 ? arguments[2] : 0.4, delay = arguments.length > 3 && arguments[3] !== void 0 ? arguments[3] : 0, onPlayCallback = arguments.length > 4 && arguments[4] !== void 0 ? arguments[4] : null;
                 this.resumeContext(); // Ensure context is active
                 if (!frequency) {
@@ -215,19 +284,35 @@ export var AudioManager = /*#__PURE__*/ function() {
                     }, delay * 1000); // Pass duration in ms
                 }
                 var oscillator = this.audioContext.createOscillator();
+                var noteGain = this.audioContext.createGain();
                 oscillator.type = 'sine'; // Simple tone
                 oscillator.frequency.setValueAtTime(frequency, this.audioContext.currentTime + delay);
-                // Simple Attack-Decay envelope
+                // Per-note envelope so overlapping piano / pattern notes don't cancel each other
                 var attackTime = 0.02;
                 var decayTime = duration * 0.8;
                 var sustainLevel = 0.1; // Sustain at low volume
-                this.gainNode.gain.setValueAtTime(0, this.audioContext.currentTime + delay); // Start silent
-                this.gainNode.gain.linearRampToValueAtTime(0.5, this.audioContext.currentTime + delay + attackTime); // Attack
-                this.gainNode.gain.linearRampToValueAtTime(sustainLevel, this.audioContext.currentTime + delay + attackTime + decayTime); // Decay to sustain
-                this.gainNode.gain.linearRampToValueAtTime(0, this.audioContext.currentTime + delay + duration); // Release
-                oscillator.connect(this.gainNode);
-                oscillator.start(this.audioContext.currentTime + delay);
-                oscillator.stop(this.audioContext.currentTime + delay + duration + 0.1); // Stop slightly after fade out
+                var startAt = this.audioContext.currentTime + delay;
+                noteGain.gain.setValueAtTime(0, startAt); // Start silent
+                noteGain.gain.linearRampToValueAtTime(0.5, startAt + attackTime); // Attack
+                noteGain.gain.linearRampToValueAtTime(sustainLevel, startAt + attackTime + decayTime); // Decay to sustain
+                noteGain.gain.linearRampToValueAtTime(0, startAt + duration); // Release
+                oscillator.connect(noteGain);
+                noteGain.connect(this.notesGain);
+                var voice = {
+                    oscillator: oscillator,
+                    gain: noteGain
+                };
+                this.activeNotes.push(voice);
+                oscillator.onended = function() {
+                    var index = _this.activeNotes.indexOf(voice);
+                    if (index !== -1) _this.activeNotes.splice(index, 1);
+                    try {
+                        noteGain.disconnect();
+                    } catch (error) {
+                    }
+                };
+                oscillator.start(startAt);
+                oscillator.stop(startAt + duration + 0.1); // Stop slightly after fade out
             }
         },
         {
@@ -235,22 +320,36 @@ export var AudioManager = /*#__PURE__*/ function() {
             key: "playPattern",
             value: function playPattern(patternData) {
                 var _this = this;
-                var onPlayCallback = arguments.length > 1 && arguments[1] !== void 0 ? arguments[1] : null, noteDuration = arguments.length > 2 && arguments[2] !== void 0 ? arguments[2] : 0.8, gapDuration = arguments.length > 3 && arguments[3] !== void 0 ? arguments[3] : 0.2;
+                var onPlayCallback = arguments.length > 1 && arguments[1] !== void 0 ? arguments[1] : null, noteDuration = arguments.length > 2 && arguments[2] !== void 0 ? arguments[2] : 0.8, gapDuration = arguments.length > 3 && arguments[3] !== void 0 ? arguments[3] : 0.2, options = arguments.length > 4 && arguments[4] !== void 0 ? arguments[4] : {};
                 // patternData = [{ noteName: 'C4', frequency: 261.63 }, ...]
                 this.resumeContext();
-                if (this.isPlaying || !patternData || patternData.length === 0) {
+                if (!patternData || patternData.length === 0) {
                     return;
                 }
+                if (this.isPlaying && !options.force) {
+                    return;
+                }
+                if (options.force) {
+                    this.stopPattern();
+                }
                 this.isPlaying = true;
-                var currentTime = 0;
+                this.playbackToken = (this.playbackToken || 0) + 1;
+                var token = this.playbackToken;
+                var currentTime = options.delay || 0;
                 patternData.forEach(function(param) {
                     var noteName = param.noteName, frequency = param.frequency;
                     _this.playNote(noteName, frequency, noteDuration, currentTime, onPlayCallback);
                     currentTime += noteDuration + gapDuration;
                 });
+                if (this._patternResetTimer) {
+                    clearTimeout(this._patternResetTimer);
+                }
                 // Set flag back to false after the last note finishes
-                setTimeout(function() {
-                    _this.isPlaying = false;
+                this._patternResetTimer = setTimeout(function() {
+                    if (_this.playbackToken === token) {
+                        _this.isPlaying = false;
+                    }
+                    _this._patternResetTimer = null;
                 }, currentTime * 1000); // Convert seconds to milliseconds
             }
         },
@@ -259,50 +358,30 @@ export var AudioManager = /*#__PURE__*/ function() {
             value: function playPatternForTarget(solfegeText, isCorrect) {
                 var onPlayCallback = arguments.length > 2 && arguments[2] !== void 0 ? arguments[2] : null;
                 this.resumeContext();
-                console.log("playPatternForTarget called. Solfege: ".concat(solfegeText, ", Correct: ").concat(isCorrect));
-                if (!this.game || !this.game.levelManager || !this.game.currentQuestion) {
-                    console.warn("Cannot play pattern for target: game state not ready (game, levelManager, or currentQuestion missing).");
-                    return;
-                }
-                // --- Temporarily focus ONLY on chime sounds ---
-                console.log("Attempting to play chime sound.");
                 if (isCorrect) {
                     this.playCorrectSound();
-                    console.log("Played correct sound.");
                 } else {
                     this.playIncorrectSound();
-                    console.log("Played incorrect sound.");
                 }
-            // const tonicNote = this.game.currentQuestion.patternNames[0]; 
-            // if (!tonicNote) {
-            //     console.warn("Cannot play pattern: tonic note not available.");
-            //     return;
-            // }
-            // const patternData = this.solfegeStringToNoteData(solfegeText, tonicNote);
-            // if (!patternData || patternData.length === 0) {
-            //     console.warn("Pattern data is empty or invalid for target:", solfegeText);
-            //     // return; // Still play chime even if pattern data is bad
-            // }
-            // const chimeDuration = 0.3; 
-            // let patternPlayTime = chimeDuration; 
-            // this.isPlaying = true; 
-            // const noteDuration = isCorrect ? 0.3 : 0.25; 
-            // const gapDuration = isCorrect ? 0.1 : 0.08;
-            // if (patternData && patternData.length > 0) { // Only proceed if patternData is valid
-            //     patternData.forEach(({ noteName, frequency }) => {
-            //         const pianoHighlightCallback = (this.game && this.game.ui && this.game.ui.pianoHighlighting) 
-            //                                      ? this.game.piano.highlightKey.bind(this.game.piano) 
-            //                                      : null;
-            //         this.playNote(noteName, frequency, noteDuration, patternPlayTime, pianoHighlightCallback);
-            //         patternPlayTime += noteDuration + gapDuration;
-            //     });
-            // } else {
-            //      patternPlayTime = 0.1; // If no pattern, just a small delay before resetting isPlaying
-            // }
-            // setTimeout(() => {
-            //     this.isPlaying = false;
-            // }, patternPlayTime * 1000);
-            // --- End of temporary chime focus ---
+                if (!this.game || !this.game.levelManager || !this.game.currentQuestion) {
+                    return;
+                }
+                var tonicNote = this.game.currentQuestion.patternNames[0];
+                if (!tonicNote || !solfegeText) {
+                    return;
+                }
+                var patternData = this.solfegeStringToNoteData(solfegeText, tonicNote);
+                if (!patternData || patternData.length === 0) {
+                    return;
+                }
+                var highlightCallback = onPlayCallback;
+                if (!highlightCallback && this.game.ui && this.game.ui.pianoHighlighting && this.game.piano) {
+                    highlightCallback = this.game.piano.highlightKey.bind(this.game.piano);
+                }
+                this.playPattern(patternData, highlightCallback, isCorrect ? 0.45 : 0.35, 0.1, {
+                    force: true,
+                    delay: 0.22
+                });
             }
         },
         {
@@ -382,7 +461,7 @@ export var AudioManager = /*#__PURE__*/ function() {
                 var osc = this.audioContext.createOscillator();
                 var gain = this.audioContext.createGain();
                 osc.connect(gain);
-                gain.connect(this.audioContext.destination); // Connect directly to destination for UI sounds
+                gain.connect(this.sfxGain); // Route UI clicks through the master mute chain
                 osc.type = 'triangle'; // A softer click sound
                 osc.frequency.setValueAtTime(880, this.audioContext.currentTime); // A high quick pitch (A5)
                 gain.gain.setValueAtTime(0.15, this.audioContext.currentTime); // Lower volume for click
@@ -398,7 +477,7 @@ export var AudioManager = /*#__PURE__*/ function() {
                 var osc = this.audioContext.createOscillator();
                 var gain = this.audioContext.createGain();
                 osc.connect(gain);
-                gain.connect(this.audioContext.destination);
+                gain.connect(this.sfxGain);
                 osc.type = 'sine';
                 // Ascending tones (e.g., C5 -> G5)
                 osc.frequency.setValueAtTime(523.25, this.audioContext.currentTime); // C5
@@ -416,7 +495,7 @@ export var AudioManager = /*#__PURE__*/ function() {
                 var osc = this.audioContext.createOscillator();
                 var gain = this.audioContext.createGain();
                 osc.connect(gain);
-                gain.connect(this.audioContext.destination);
+                gain.connect(this.sfxGain);
                 osc.type = 'square'; // Slightly harsher sound
                 // Descending tones (e.g., G3 -> C3)
                 osc.frequency.setValueAtTime(196.00, this.audioContext.currentTime); // G3
@@ -435,7 +514,7 @@ export var AudioManager = /*#__PURE__*/ function() {
                 var osc = this.audioContext.createOscillator();
                 var gain = this.audioContext.createGain();
                 osc.connect(gain);
-                gain.connect(this.audioContext.destination); // Use main destination
+                gain.connect(this.sfxGain);
                 osc.type = 'triangle'; // A simple, clean wave for a laser sound
                 // Quick pitch drop for "pew" effect
                 var startTime = this.audioContext.currentTime;

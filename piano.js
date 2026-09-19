@@ -172,6 +172,12 @@ export var Piano = /*#__PURE__*/ function() {
             value: function highlightKey(noteName) {
                 var duration = arguments.length > 1 && arguments[1] !== void 0 ? arguments[1] : 300;
                 var keyMesh = this.keys[noteName];
+                if (!keyMesh && noteName) {
+                    var match = String(noteName).match(/^([A-G]#?)(\d+)$/);
+                    if (match) {
+                        keyMesh = this.keys[match[1] + (parseInt(match[2], 10) - 1)] || this.keys[match[1] + (parseInt(match[2], 10) + 1)];
+                    }
+                }
                 if (keyMesh && !keyMesh.userData.isPressed) {
                     keyMesh.userData.isPressed = true; // Prevent re-triggering animation if already pressed
                     var originalColor = keyMesh.userData.originalColor;

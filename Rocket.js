@@ -83,26 +83,54 @@ export var Rocket = /*#__PURE__*/ function() {
             }
         },
         {
+            key: "isDown",
+            value: function isDown(keysPressed, keys) {
+                if (!keysPressed) return false;
+                return keys.some(function(key) {
+                    return !!keysPressed[key];
+                });
+            }
+        },
+        {
             key: "turnLeft",
             value: function turnLeft(delta) {
                 this.group.rotation.z += this.turnSpeed * delta;
-                console.log("Turn Left - New Rotation Z:", this.group.rotation.z);
             }
         },
         {
             key: "turnRight",
             value: function turnRight(delta) {
                 this.group.rotation.z -= this.turnSpeed * delta;
-                console.log("Turn Right - New Rotation Z:", this.group.rotation.z);
             }
         },
         {
             key: "update",
             value: function update(delta, keysPressed) {
                 if (!this.group.visible) return;
-                var thrustAppliedThisFrame = false;
-                if (keysPressed['ArrowUp']) {
-                    thrustAppliedThisFrame = true;
+                keysPressed = keysPressed || {};
+                if (this.isDown(keysPressed, [
+                    'ArrowLeft',
+                    'a',
+                    'A',
+                    'KeyA'
+                ])) {
+                    this.turnLeft(delta);
+                }
+                if (this.isDown(keysPressed, [
+                    'ArrowRight',
+                    'd',
+                    'D',
+                    'KeyD'
+                ])) {
+                    this.turnRight(delta);
+                }
+                var thrustAppliedThisFrame = this.isDown(keysPressed, [
+                    'ArrowUp',
+                    'w',
+                    'W',
+                    'KeyW'
+                ]);
+                if (thrustAppliedThisFrame) {
                     var angle = this.group.rotation.z + Math.PI / 2;
                     var direction = new THREE.Vector3(Math.cos(angle), Math.sin(angle), 0);
                     this.velocity.addScaledVector(direction, this.acceleration * delta);
@@ -110,18 +138,22 @@ export var Rocket = /*#__PURE__*/ function() {
                 this.isThrusting = thrustAppliedThisFrame;
                 this.group.position.addScaledVector(this.velocity, delta);
                 this.velocity.multiplyScalar(Math.pow(this.drag, delta * 60));
-                if (Math.random() < 0.05) {
-                    console.log("Group Rotation Z:", this.group.rotation.z);
-                }
                 var exhaustAngle = this.group.rotation.z + Math.PI / 2;
                 this.exhaustSystem.update(delta, this.isThrusting, this.group.position, exhaustAngle);
-                var aspect = window.innerWidth / window.innerHeight;
-                var worldHeight = (this.camera ? this.camera.getFilmHeight() : 10) * 0.5;
-                var worldWidth = worldHeight * aspect;
                 var bounds = {
-                    x: worldWidth * 2.5,
-                    y: worldHeight * 1.5
+                    x: 12,
+                    y: 8
                 };
+                if (this.camera) {
+                    var distance = Math.abs(this.group.position.z - this.camera.position.z);
+                    var vFOV = THREE.MathUtils.degToRad(this.camera.fov);
+                    var visibleHeight = 2 * Math.tan(vFOV / 2) * distance;
+                    var visibleWidth = visibleHeight * this.camera.aspect;
+                    bounds = {
+                        x: visibleWidth * 0.52,
+                        y: visibleHeight * 0.48
+                    };
+                }
                 if (this.group.position.x > bounds.x) this.group.position.x = -bounds.x;
                 if (this.group.position.x < -bounds.x) this.group.position.x = bounds.x;
                 if (this.group.position.y > bounds.y) this.group.position.y = -bounds.y;
@@ -143,21 +175,6 @@ export var Rocket = /*#__PURE__*/ function() {
                 // Apply dynamic x-offset correction based on rocket's x-position
                 var xCorrection = -this.xOffsetCorrectionFactor * this.group.position.x;
                 projectedPos.x += xCorrection;
-                // Debug logging to monitor the correction
-                if (Math.random() < 0.05) {
-                    var groupPos = this.group.position;
-                    var groupRotZ = this.group.rotation.z;
-                    console.log("-- getTipPosition (Projected with X Correction) --");
-                    console.log("Group Pos: (".concat(groupPos.x.toFixed(3), ", ").concat(groupPos.y.toFixed(3), ", ").concat(groupPos.z.toFixed(3), ")"));
-                    console.log("Group Rot Z: ".concat(groupRotZ.toFixed(3)));
-                    console.log("Local Tip Offset: (".concat(localTipOffset.x.toFixed(3), ", ").concat(localTipOffset.y.toFixed(3), ", ").concat(localTipOffset.z.toFixed(3), ")"));
-                    console.log("World Tip Offset: (".concat(worldTipOffset.x.toFixed(3), ", ").concat(worldTipOffset.y.toFixed(3), ", ").concat(worldTipOffset.z.toFixed(3), ")"));
-                    console.log("Actual Tip World Pos: (".concat(tipWorldPos.x.toFixed(3), ", ").concat(tipWorldPos.y.toFixed(3), ", ").concat(tipWorldPos.z.toFixed(3), ")"));
-                    console.log("Scale Factor: ".concat(scaleFactor.toFixed(3)));
-                    console.log("X Correction: ".concat(xCorrection.toFixed(3), " (Factor: ").concat(this.xOffsetCorrectionFactor, ")"));
-                    console.log("Projected Start Pos: (".concat(projectedPos.x.toFixed(3), ", ").concat(projectedPos.y.toFixed(3), ", ").concat(projectedPos.z.toFixed(3), ")"));
-                    console.log("--------------------");
-                }
                 return projectedPos;
             }
         },

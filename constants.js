@@ -3,9 +3,12 @@ export var GAME_STATE = {
     LOADING: 'LOADING',
     START_SCREEN: 'START_SCREEN',
     PLAYING: 'PLAYING',
+    PAUSED: 'PAUSED',
     GAME_OVER: 'GAME_OVER',
     HIGH_SCORE_ENTRY: 'HIGH_SCORE_ENTRY'
 };
+export var THEME_MUSIC_URL = 'https://play.rosebud.ai/assets/Pitch Perfector Theme.mp3?CFIc';
+export var MUTE_STORAGE_KEY = 'pitchPerfector.muted';
 // Musical Notes (Frequencies in Hz) - C3 to C5 Range
 // Using standard A4 = 440 Hz tuning
 export var NOTES = {
@@ -33,7 +36,19 @@ export var NOTES = {
     'A4': 440.00,
     'A#4': 466.16,
     'B4': 493.88,
-    'C5': 523.25 // End note included for range calculation
+    'C5': 523.25,
+    'C#5': 554.37,
+    'D5': 587.33,
+    'D#5': 622.25,
+    'E5': 659.25,
+    'F5': 698.46,
+    'F#5': 739.99,
+    'G5': 783.99,
+    'G#5': 830.61,
+    'A5': 880.00,
+    'A#5': 932.33,
+    'B5': 987.77,
+    'C6': 1046.50
 };
 // Solfege mapping (relative to tonic = 0 semitones)
 export var SOLFEGE_MAP = {

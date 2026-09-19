@@ -77,6 +77,7 @@ function _unsupported_iterable_to_array(o, minLen) {
 }
 import * as THREE from 'three';
 import { NOTES, SOLFEGE_MAP } from './constants.js';
+import { resolveRelativeNote } from './scoreUtils.js';
 // Helper set for chromatic intervals (semitones relative to tonic or previous note)
 var chromaticIntervals = new Set([
     1,
@@ -859,15 +860,12 @@ export var LevelManager = /*#__PURE__*/ function() {
                             // Optionally return null or default note if syllable is bad
                             return null; // Indicate failure
                         }
-                        var noteIndex = tonicIndex + interval;
-                        // Ensure the calculated index is within the bounds of our defined notes
-                        if (noteIndex >= 0 && noteIndex < this.noteNames.length) {
-                            patternNotes.push(this.noteNames[noteIndex]);
-                        } else {
-                            console.warn("Calculated note index out of bounds: ".concat(noteIndex, " for syllable ").concat(syllable));
-                            // Optionally return null or default note
-                            return null; // Indicate failure
+                        var noteName = resolveRelativeNote(this.noteNames, tonicNote, interval);
+                        if (!noteName) {
+                            console.warn("Could not resolve syllable ".concat(syllable, " from tonic ").concat(tonicNote));
+                            return null;
                         }
+                        patternNotes.push(noteName);
                     }
                 } catch (err) {
                     _didIteratorError = true;

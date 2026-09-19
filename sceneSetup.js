@@ -6,7 +6,7 @@ export function setupScene(container) {
         alpha: true
     });
     renderer.setSize(container.clientWidth, container.clientHeight);
-    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     renderer.setClearColor(0x000000, 0); // Transparent background initially
     container.appendChild(renderer.domElement);
     // Scene

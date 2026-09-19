@@ -42,8 +42,8 @@ var PADDING_PX = 10; // Padding around text (e.g., 5 * 2)
 var BORDER_PX = 6; // Border thickness in pixels (e.g., 3 * 2)
 // --- Sprite Scale in World Units ---
 // Adjust these to control the final visual size in the 3D scene
-var SPRITE_SCALE_X = 0.2; // Quartered size
-var SPRITE_SCALE_Y = 0.05; // Quartered size
+var SPRITE_SCALE_X = 0.32;
+var SPRITE_SCALE_Y = 0.09;
 export var AnswerTarget = /*#__PURE__*/ function() {
     "use strict";
     function AnswerTarget(scene, camera, answerText, solfegeText) {
@@ -53,6 +53,8 @@ export var AnswerTarget = /*#__PURE__*/ function() {
         this.camera = camera; // Store camera reference
         this.answerText = answerText; // Text displayed (Solfege or Pitch)
         this.solfegeText = solfegeText; // The actual answer value (always Solfege)
+        this.originalSolfegeText = solfegeText;
+        this.hasBeenScored = false;
         // Apply a random offset to the initial position to spread targets out more
         var spreadX = THREE.MathUtils.randFloatSpread(8); // Wider horizontal spread (-4 to +4)
         var spreadY = THREE.MathUtils.randFloatSpread(4); // Wider vertical spread (-2 to +2)
@@ -255,14 +257,12 @@ export var AnswerTarget = /*#__PURE__*/ function() {
                 }
                 // Handle REPEATED incorrect hits (already hit at least once)
                 if (!isCorrect && this.isHit) {
-                    console.log("Repeated hit on incorrect target: ".concat(this.solfegeText));
                     // Apply the incorrect pulse effect on each hit
                     this.applyIncorrectPulse();
                     // Exit early to prevent running the 'first incorrect hit' logic again
                     return;
                 }
                 // If we reach here, it's either a CORRECT hit OR the FIRST incorrect hit.
-                console.log("Target hit: ".concat(this.solfegeText, ", Correct: ").concat(isCorrect));
                 if (isCorrect) {
                     this.isHit = true;
                     this.isSelected = true; // Mark as selected when hit
