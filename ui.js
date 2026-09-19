@@ -159,7 +159,7 @@ export var UI = /*#__PURE__*/ function() {
         this.answerContainer.style.pointerEvents = 'auto';
         this.feedbackElement = this.createText('', '20px', 'center', {
             position: 'absolute',
-            bottom: '25%',
+            bottom: '38%',
             width: '80%',
             backgroundColor: 'rgba(0,0,0,0.7)',
             padding: '10px',
