@@ -118,7 +118,7 @@ export var UI = /*#__PURE__*/ function() {
             gap: '8px',
             flexShrink: 0
         });
-        this.statsDisplay = this.createText('Q 1/10', '10px', 'right');
+        this.statsDisplay = this.createText('1/10', '12px', 'right');
         this.muteButton = this.createButton('Mute', function() {
             return _this.game.toggleMute();
         }, '10px');
@@ -201,11 +201,12 @@ export var UI = /*#__PURE__*/ function() {
         this.pianoToggle.style.transform = 'translateX(-50%)';
         this.pianoToggle.style.visibility = 'hidden'; // Start hidden
         this.uiContainer.appendChild(this.pianoToggle);
-        this.helpPanel = this.createText('Listen to the 3-note pattern, then pick the matching solfege.\nButtons or keys 1-4 work. Fly with WASD / arrows and Space to shoot. Click a floating answer too.\nEnter starts / next · P replay · M mute · Esc pause', '10px', 'center');
+        this.helpPanel = this.createText('Hear 3 notes. Pick the matching solfege.\n1-4 or click answers. WASD / arrows + Space to fly.\nEnter start/next  ·  P replay  ·  M mute  ·  Esc pause', '12px', 'center');
         this.helpPanel.className = 'pp-help';
         this.helpPanel.style.whiteSpace = 'pre-line';
-        this.helpPanel.style.maxWidth = '760px';
-        this.helpPanel.style.lineHeight = '1.8';
+        this.helpPanel.style.maxWidth = '820px';
+        this.helpPanel.style.lineHeight = '1.9';
+        this.helpPanel.style.color = '#00FFFF';
         this.highScorePanel = this.createDiv({
             className: 'pp-scores'
         });
@@ -730,7 +731,7 @@ export var UI = /*#__PURE__*/ function() {
             value: function updateStats(stats) {
                 if (!this.statsDisplay || !stats) return;
                 var streakText = stats.streak > 1 ? "  ·  Streak x".concat(stats.streak) : '';
-                this.statsDisplay.textContent = "Q ".concat(stats.question, "/").concat(stats.total).concat(streakText);
+                this.statsDisplay.textContent = "".concat(stats.question, "/").concat(stats.total).concat(streakText);
             }
         },
         {

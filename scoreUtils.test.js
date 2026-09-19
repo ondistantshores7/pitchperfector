@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { calculateStreakBonus, clampScore, formatSolfegeDisplay, sanitizeInitials } from './scoreUtils.js';
+import { calculateStreakBonus, clampScore, formatSolfegeDisplay, resolveRelativeNote, sanitizeInitials } from './scoreUtils.js';
+import { NOTES } from './constants.js';
 import { addHighScore, isHighScore, loadHighScores, MAX_HIGH_SCORES, normalizeHighScores, recordHighScore } from './highScores.js';
 
 function memoryStorage(initial) {
@@ -26,6 +27,13 @@ describe('scoreUtils', function() {
         assert.equal(calculateStreakBonus(3, 100), 20);
         assert.equal(calculateStreakBonus(6, 100), 50);
         assert.equal(calculateStreakBonus(12, 100), 50);
+    });
+
+    it('resolves solfege above C5 instead of failing', function() {
+        var noteNames = Object.keys(NOTES);
+        assert.equal(resolveRelativeNote(noteNames, 'G4', 7), 'D5');
+        assert.equal(resolveRelativeNote(noteNames, 'C5', 11), 'B5');
+        assert.equal(resolveRelativeNote(noteNames, 'C6', 7), 'G5');
     });
 
     it('clamps and formats score helpers', function() {

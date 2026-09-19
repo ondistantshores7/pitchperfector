@@ -147,6 +147,7 @@ export var Game = /*#__PURE__*/ function() {
         {
             key: "start",
             value: function start() {
+                var _this = this;
                 this.ui.showStartScreen();
                 // --- Show rocket specifically for start screen ---
                 this.rocket.show();
@@ -154,8 +155,14 @@ export var Game = /*#__PURE__*/ function() {
                 this.rocket.group.position.set(0, 4.5, -20); // Adjust Y value as needed, Z behind targets
                 this.rocket.group.rotation.z = 0; // Point straight up for start screen visual
                 this.animate();
-                // Start loading and playing background music
-                this.audioManager.loadBackgroundMusic(THEME_MUSIC_URL);
+                var startTheme = function() {
+                    _this.audioManager.resumeContext();
+                    _this.audioManager.loadBackgroundMusic(THEME_MUSIC_URL);
+                    window.removeEventListener('pointerdown', startTheme);
+                    window.removeEventListener('keydown', startTheme);
+                };
+                window.addEventListener('pointerdown', startTheme);
+                window.addEventListener('keydown', startTheme);
             }
         },
         {
@@ -418,7 +425,6 @@ export var Game = /*#__PURE__*/ function() {
             key: "triggerIncorrectButtonAnimation",
             value: function triggerIncorrectButtonAnimation(buttonElement) {
                 // Log animation trigger
-                console.log("Triggering incorrect animation for button:", buttonElement);
                 // Apply shake animation
                 if (buttonElement) {
                     // Remove the shake class first to allow re-triggering
